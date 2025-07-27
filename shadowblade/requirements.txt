@@ -1,0 +1,8 @@
+mcp
+sse-starlette
+starlette
+google-adk
+google-adk[eval]
+pytest
+pytest-asyncio
+a2a-sdk

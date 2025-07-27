@@ -7,7 +7,7 @@
 # --- Configuration ---
 PROJECT_FILE="~/project_id.txt"
 GOOGLE_CLOUD_LOCATION="us-central1"
-REPO_NAME="agentverse-developer"
+REPO_NAME="agentverse-repo"
 # ---------------------
 
 

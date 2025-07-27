@@ -10,7 +10,7 @@ RUN pip install --upgrade pip
 # --- Dependency Installation ---
 # Copy only the requirements file first to leverage Docker's build cache.
 # This step is only re-run if requirements.txt changes.
-COPY ./requirements.txt /app/requirements.txt
+COPY ./shadowblade/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Application Code ---
