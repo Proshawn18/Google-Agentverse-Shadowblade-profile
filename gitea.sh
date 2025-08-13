@@ -31,145 +31,158 @@ NEW_USER_EMAIL="dev@example.com"
 # SCRIPT LOGIC
 # ==============================================================================
 
-echo " Gitea & Gitea-MCP (Hybrid Config) Full Setup Script"
-echo "-----------------------------------------------------"
+echo " Gitea & Gitea-MCP (Hybrid Config) Smart Setup Script"
+echo "--------------------------------------------------------"
 echo
 
-# --- Step 0: Clean Up and Network Setup ---
-echo "STEP 0: Cleaning up previous runs and setting up network..."
-if [ "$(docker ps -a -q -f name=^/${MCP_CONTAINER_NAME}$)" ]; then
-    docker stop "${MCP_CONTAINER_NAME}"
-    docker rm "${MCP_CONTAINER_NAME}"
-fi
-if [ "$(docker ps -a -q -f name=^/${GITEA_CONTAINER_NAME}$)" ]; then
-    docker stop "${GITEA_CONTAINER_NAME}"
-    docker rm "${GITEA_CONTAINER_NAME}"
-fi
-docker network create "${DOCKER_NETWORK_NAME}" || true
-
-# Check if gitea-data.zip exists AND the gitea-data directory does NOT exist
-if [ -f "gitea-data.zip" ] && [ ! -d "${GITEA_DATA_PATH}" ]; then
-    echo "Found gitea-data.zip and '${GITEA_DATA_PATH}' does not exist. Unzipping..."
-    unzip gitea-data.zip
-    # Note: The 'unzip' command will typically create the 'gitea-data' directory
-    # if the zip file contains 'gitea-data/' as its root entry.
-elif [ -f "gitea-data.zip" ] && [ -d "${GITEA_DATA_PATH}" ]; then
-    echo "Found gitea-data.zip, but '${GITEA_DATA_PATH}' already exists. Skipping unzip to prevent overwriting."
-else
-    echo "gitea-data.zip not found. Skipping unzip."
-fi
-
-mkdir -p "${GITEA_DATA_PATH}" # Ensures the Gitea data directory exists, important if no zip was found or if zip contents were extracted elsewhere.
-
-echo "Cleanup and network setup complete."
-echo
-
-# --- Step 1: Deploy Gitea Container ---
-echo "STEP 1: Starting the main Gitea container..."
-docker run \
-    -d \
-    --name "${GITEA_CONTAINER_NAME}" \
-    --network "${DOCKER_NETWORK_NAME}" \
-    -p "${HOST_GITEA_WEB_PORT}:3000" \
-    -p "${HOST_GITEA_SSH_PORT}:22" \
-    -v "${GITEA_DATA_PATH}:/data" \
-    --restart=always \
-    gitea/gitea:latest
-
-echo "Container started. Waiting for it to create initial files..."
-sleep 15
-
-# --- Step 2: Get Cloud Shell URL ---
-echo; echo "STEP 2: Getting the public Cloud Shell URL..."
-if ! command -v cloudshell &> /dev/null; then
-    GITEA_ROOT_URL="http://localhost:${HOST_GITEA_WEB_PORT}/"
-else
-    GITEA_ROOT_URL=$(cloudshell get-web-preview-url -p "${HOST_GITEA_WEB_PORT}")
-fi
-echo "--> Detected URL: ${GITEA_ROOT_URL}"
-
-# --- Step 3: Update Config File ---
-echo; echo "STEP 3: Modifying the configuration file inside the Gitea container..."
-CONFIG_FILE_PATH="/data/gitea/conf/app.ini"
-docker exec "${GITEA_CONTAINER_NAME}" sed -i "s|^ROOT_URL\s*=\s*.*|ROOT_URL = ${GITEA_ROOT_URL}|" "${CONFIG_FILE_PATH}"
-if ! docker exec "${GITEA_CONTAINER_NAME}" grep -q "\[security\]" "${CONFIG_FILE_PATH}"; then
-    docker exec "${GITEA_CONTAINER_NAME}" sh -c "echo -e '\n[security]' >> ${CONFIG_FILE_PATH}"
-fi
-docker exec "${GITEA_CONTAINER_NAME}" sed -i "/\[security\]/a INSTALL_LOCK = true" "${CONFIG_FILE_PATH}"
-echo "Configuration updated."
-
-# --- Step 4: Restart Gitea and Wait for Health Check ---
-echo; echo "STEP 4: Restarting Gitea and waiting for it to be ready..."
-docker restart "${GITEA_CONTAINER_NAME}"
-echo "--> Waiting for Gitea API to come online..."
-ATTEMPTS=0
-MAX_ATTEMPTS=30
-until [ "$(docker exec "${GITEA_CONTAINER_NAME}" curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/version)" = "200" ]; do
-    if [ ${ATTEMPTS} -eq ${MAX_ATTEMPTS} ]; then
-        echo "Error: Gitea did not become healthy in time. Check logs with 'docker logs ${GITEA_CONTAINER_NAME}'"
-        exit 1
-    fi
-    ATTEMPTS=$((ATTEMPTS+1))
-    printf "."
-    sleep 2
-done
-echo " Gitea API is online!"
-
-# --- Step 5: Create Users ---
-echo; echo "STEP 5: Creating Gitea users..."
-docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user create \
-    --username "${ADMIN_USER}" \
-    --password "${ADMIN_PASSWORD}" \
-    --email "${ADMIN_EMAIL}" \
-    --admin \
-    --must-change-password=false || echo "--> Admin user '${ADMIN_USER}' likely already exists. Continuing..."
-
-docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user create \
-    --username "${NEW_USER}" \
-    --password "${NEW_USER_PASSWORD}" \
-    --email "${NEW_USER_EMAIL}" \
-    --must-change-password=false || echo "--> Regular user '${NEW_USER}' likely already exists. Continuing..."
-
-# --- Step 6: Generate Access Token for MCP ---
-echo; echo "STEP 6: Generating a unique access token for user '${NEW_USER}'..."
-MCP_TOKEN_NAME="gitea-mcp-token-$(date +%s)"
-GITEA_MCP_TOKEN=$(docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user generate-access-token \
-    --username "${NEW_USER}" \
-    --token-name "${MCP_TOKEN_NAME}" \
-    --scopes "all" | awk '{print $NF}' | tr -d '\r')
-
-if [ -z "$GITEA_MCP_TOKEN" ]; then
-    echo "Error: Failed to generate Gitea access token. Please check Gitea logs."
+# --- Preliminary Check: Ensure Docker Daemon is Running ---
+echo "STEP 0: Checking if Docker daemon is running..."
+if ! docker info > /dev/null 2>&1; then
+    echo "Error: Docker daemon is not running. Please start Docker and run the script again."
     exit 1
 fi
-echo "--> Successfully parsed token for user '${NEW_USER}': ${GITEA_MCP_TOKEN}"
+echo "--> Docker daemon is available."
+echo
 
-# --- Step 7: Start Gitea-MCP Container ---
-echo; echo "STEP 7: Starting the Gitea-MCP container with a hybrid configuration..."
-GITEA_INTERNAL_URL="http://${GITEA_CONTAINER_NAME}:3000"
+# --- Step 1: Network & Gitea Container Setup ---
+echo "STEP 1: Checking Gitea container status..."
 
-# Using the requested hybrid of environment variable for token and flags for other settings.
-# The --entrypoint flag is CRITICAL to prevent the "executable file not found" error.
-docker run \
-    -d \
-    --name "${MCP_CONTAINER_NAME}" \
-    --network "${DOCKER_NETWORK_NAME}" \
-    -p "${HOST_MCP_WEB_PORT}:8080" \
-    --restart=always \
-    -e GITEA_ACCESS_TOKEN="${GITEA_MCP_TOKEN}" \
-    --entrypoint "/app/gitea-mcp" \
-    "${MCP_IMAGE}" \
-    -host "${GITEA_INTERNAL_URL}" \
-    -transport "sse" \
-    -insecure
+# Check if Gitea container is currently running
+if [ "$(docker ps -q -f name=^/${GITEA_CONTAINER_NAME}$)" ]; then
+    echo "--> Gitea container '${GITEA_CONTAINER_NAME}' is already running. Skipping its setup."
+else
+    echo "--> Gitea container not running. Starting setup..."
+
+    # Clean up only if a stopped container with the same name exists
+    if [ "$(docker ps -a -q -f name=^/${GITEA_CONTAINER_NAME}$)" ]; then
+        echo "--> Removing stopped container '${GITEA_CONTAINER_NAME}'."
+        docker rm "${GITEA_CONTAINER_NAME}" > /dev/null
+    fi
+
+    # Create network, silencing error if it already exists
+    docker network create "${DOCKER_NETWORK_NAME}" > /dev/null 2>&1 || true
+
+    # Unzip data if applicable
+    if [ -f "gitea-data.zip" ] && [ ! -d "${GITEA_DATA_PATH}" ]; then
+        echo "--> Found gitea-data.zip. Unzipping..."
+        unzip gitea-data.zip
+    fi
+    mkdir -p "${GITEA_DATA_PATH}"
+
+    # Deploy Gitea Container
+    echo "--> Starting the main Gitea container..."
+    docker run \
+        -d \
+        --name "${GITEA_CONTAINER_NAME}" \
+        --network "${DOCKER_NETWORK_NAME}" \
+        -p "${HOST_GITEA_WEB_PORT}:3000" \
+        -p "${HOST_GITEA_SSH_PORT}:22" \
+        -v "${GITEA_DATA_PATH}:/data" \
+        --restart=always \
+        gitea/gitea:latest
+
+    echo "--> Container starting. Waiting for it to create initial files..."
+    sleep 15
+
+    # Get public URL for configuration
+    if ! command -v cloudshell &> /dev/null; then
+        GITEA_ROOT_URL_SETUP="http://localhost:${HOST_GITEA_WEB_PORT}/"
+    else
+        GITEA_ROOT_URL_SETUP=$(cloudshell get-web-preview-url -p "${HOST_GITEA_WEB_PORT}")
+    fi
+
+    # Configure app.ini
+    echo "--> Modifying the configuration file inside the container..."
+    CONFIG_FILE_PATH="/data/gitea/conf/app.ini"
+    docker exec "${GITEA_CONTAINER_NAME}" sed -i "s|^ROOT_URL\s*=\s*.*|ROOT_URL = ${GITEA_ROOT_URL_SETUP}|" "${CONFIG_FILE_PATH}"
+    if ! docker exec "${GITEA_CONTAINER_NAME}" grep -q "\[security\]" "${CONFIG_FILE_PATH}"; then
+        docker exec "${GITEA_CONTAINER_NAME}" sh -c "echo -e '\n[security]' >> ${CONFIG_FILE_PATH}"
+    fi
+    docker exec "${GITEA_CONTAINER_NAME}" sed -i "/\[security\]/a INSTALL_LOCK = true" "${CONFIG_FILE_PATH}"
+
+    # Restart Gitea and Wait for Health Check
+    echo "--> Restarting Gitea and waiting for it to be ready..."
+    docker restart "${GITEA_CONTAINER_NAME}"
+    ATTEMPTS=0
+    MAX_ATTEMPTS=30
+    until [ "$(docker exec "${GITEA_CONTAINER_NAME}" curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/version)" = "200" ]; do
+        if [ ${ATTEMPTS} -eq ${MAX_ATTEMPTS} ]; then
+            echo "Error: Gitea did not become healthy in time. Check logs with 'docker logs ${GITEA_CONTAINER_NAME}'"
+            exit 1
+        fi
+        ATTEMPTS=$((ATTEMPTS+1))
+        printf "."
+        sleep 2
+    done
+    echo " Gitea API is online!"
+
+    # Create Users
+    echo "--> Creating Gitea users..."
+    docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user create --username "${ADMIN_USER}" --password "${ADMIN_PASSWORD}" --email "${ADMIN_EMAIL}" --admin --must-change-password=false || echo "--> Admin user '${ADMIN_USER}' likely already exists."
+    docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user create --username "${NEW_USER}" --password "${NEW_USER_PASSWORD}" --email "${NEW_USER_EMAIL}" --must-change-password=false || echo "--> Regular user '${NEW_USER}' likely already exists."
+fi
+echo
+
+# --- Step 2: Gitea-MCP Container Setup ---
+echo "STEP 2: Checking Gitea-MCP container status..."
+
+# Check if Gitea-MCP container is currently running
+if [ "$(docker ps -q -f name=^/${MCP_CONTAINER_NAME}$)" ]; then
+    echo "--> Gitea-MCP container '${MCP_CONTAINER_NAME}' is already running. Skipping its setup."
+else
+    echo "--> Gitea-MCP container not running. Starting setup..."
+
+    # Clean up only if a stopped container with the same name exists
+    if [ "$(docker ps -a -q -f name=^/${MCP_CONTAINER_NAME}$)" ]; then
+        echo "--> Removing stopped container '${MCP_CONTAINER_NAME}'."
+        docker rm "${MCP_CONTAINER_NAME}" > /dev/null
+    fi
+
+    # Generate Access Token for MCP (requires running Gitea)
+    echo "--> Generating a unique access token for user '${NEW_USER}'..."
+    MCP_TOKEN_NAME="gitea-mcp-token-$(date +%s)"
+    GITEA_MCP_TOKEN=$(docker exec -u git "${GITEA_CONTAINER_NAME}" gitea admin user generate-access-token --username "${NEW_USER}" --token-name "${MCP_TOKEN_NAME}" --scopes "all" | awk '{print $NF}' | tr -d '\r')
+
+    if [ -z "$GITEA_MCP_TOKEN" ]; then
+        echo "Error: Failed to generate Gitea access token. Please check Gitea logs."
+        exit 1
+    fi
+    echo "--> Successfully generated token."
+
+    # Start Gitea-MCP Container
+    echo "--> Starting the Gitea-MCP container..."
+    GITEA_INTERNAL_URL="http://${GITEA_CONTAINER_NAME}:3000"
+    docker run \
+        -d \
+        --name "${MCP_CONTAINER_NAME}" \
+        --network "${DOCKER_NETWORK_NAME}" \
+        -p "${HOST_MCP_WEB_PORT}:8080" \
+        --restart=always \
+        -e GITEA_ACCESS_TOKEN="${GITEA_MCP_TOKEN}" \
+        --entrypoint "/app/gitea-mcp" \
+        "${MCP_IMAGE}" \
+        -host "${GITEA_INTERNAL_URL}" \
+        -transport "sse" \
+        -insecure
+fi
 
 # --- Final Output ---
+# This part runs every time to provide current access information.
 echo
-echo "-----------------------------------------------------"
-echo " SCRIPT COMPLETE! ALL SERVICES ARE READY!"
+echo "--------------------------------------------------------"
+echo " SCRIPT COMPLETE! ALL SERVICES SHOULD BE READY."
 echo
+
+if ! command -v cloudshell &> /dev/null; then
+    GITEA_ROOT_URL="http://localhost:${HOST_GITEA_WEB_PORT}/"
+    MCP_ROOT_URL="http://localhost:${HOST_MCP_WEB_PORT}/"
+else
+    GITEA_ROOT_URL=$(cloudshell get-web-preview-url -p "${HOST_GITEA_WEB_PORT}")
+    MCP_ROOT_URL=$(cloudshell get-web-preview-url -p "${HOST_MCP_WEB_PORT}")
+fi
+
 echo " >> Main Gitea Web UI: ${GITEA_ROOT_URL}"
-echo " >> Gitea-MCP Web UI:  (Preview on port ${HOST_MCP_WEB_PORT} in Cloud Shell)"
+echo " >> Gitea-MCP Web UI:  ${MCP_ROOT_URL}"
 echo
 echo " >> Admin User:        '${ADMIN_USER}' / '${ADMIN_PASSWORD}'"
 echo " >> Regular User:      '${NEW_USER}' / '${NEW_USER_PASSWORD}'"

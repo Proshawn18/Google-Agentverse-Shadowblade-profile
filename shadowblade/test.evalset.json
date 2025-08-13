@@ -1,0 +1,126 @@
+{
+  "eval_set_id": "sample",
+  "name": "sample",
+  "description": null,
+  "eval_cases": [
+    {
+      "eval_id": "case0cbaa0",
+      "conversation": [
+        {
+          "invocation_id": "e-affe9a3c-0511-4b23-b459-eea198272130",
+          "user_content": {
+            "parts": [
+              {
+                "video_metadata": null,
+                "thought": null,
+                "inline_data": null,
+                "file_data": null,
+                "thought_signature": null,
+                "code_execution_result": null,
+                "executable_code": null,
+                "function_call": null,
+                "function_response": null,
+                "text": "We're facing the 'Monolith of Eternal Dependencies'. It's ancient and brittle. Intel says its weakness is a 'Revolutionary Rewrite'. Let's bring it down."
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "video_metadata": null,
+                "thought": null,
+                "inline_data": null,
+                "file_data": null,
+                "thought_signature": null,
+                "code_execution_result": null,
+                "executable_code": null,
+                "function_call": null,
+                "function_response": null,
+                "text": "Soulshard Dagger deployed. Initiated Arcane/Piercing strike, dealing 15 base damage. Phase Strike effect activated, ignoring target's legacy complexity."
+              }
+            ],
+            "role": null
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "id": "adk-d1f7cd0b-5c0d-4313-8f73-d5cd1904b909",
+                "args": {},
+                "name": "enchant_soulshard_dagger"
+              }
+            ],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 1753480289.499237
+        }
+      ],
+      "session_input": {
+        "app_name": "shadowblade",
+        "user_id": "user",
+        "state": {}
+      },
+      "creation_timestamp": 1753480298.7782462
+    },
+    {
+      "eval_id": "casef3bf15",
+      "conversation": [
+        {
+          "invocation_id": "e-e3b0726f-d45c-4602-baa6-545245b8ed12",
+          "user_content": {
+            "parts": [
+              {
+                "video_metadata": null,
+                "thought": null,
+                "inline_data": null,
+                "file_data": null,
+                "thought_signature": null,
+                "code_execution_result": null,
+                "executable_code": null,
+                "function_call": null,
+                "function_response": null,
+                "text": "The 'Scope Creep Hydra' is sprouting new heads with every commit! Its weakness is 'Inescapable Reality'. We need to get this under control!\n\n"
+              }
+            ],
+            "role": "user"
+          },
+          "final_response": {
+            "parts": [
+              {
+                "video_metadata": null,
+                "thought": null,
+                "inline_data": null,
+                "file_data": null,
+                "thought_signature": null,
+                "code_execution_result": null,
+                "executable_code": null,
+                "function_call": null,
+                "function_response": null,
+                "text": "Quickstart Crossbow deployed. Damage: 4 Initiative. Special Effect: Project Scaffolding. Target engaged."
+              }
+            ],
+            "role": null
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "id": "adk-28b382c4-b3b6-449b-a730-d6474808a909",
+                "args": {},
+                "name": "fire_quickstart_crossbow"
+              }
+            ],
+            "intermediate_responses": []
+          },
+          "creation_timestamp": 1753480370.033122
+        }
+      ],
+      "session_input": {
+        "app_name": "shadowblade",
+        "user_id": "user",
+        "state": {}
+      },
+      "creation_timestamp": 1753480402.2185261
+    }
+  ],
+  "creation_timestamp": 1753480279.247557
+}
