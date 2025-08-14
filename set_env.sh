@@ -77,6 +77,11 @@ echo "Exported REPO_NAME=$REPO_NAME"
 export REGION="$GOOGLE_CLOUD_LOCATION"
 echo "Exported REGION=$GOOGLE_CLOUD_LOCATION"
 
+# 13. Export REGION
+export BUCKET_NAME="$GOOGLE_CLOUD_PROJECT"
+echo "Exported BUCKET_NAME=$BUCKET_NAME"
+
+
 
 echo ""
 echo "--- Environment setup complete ---"
